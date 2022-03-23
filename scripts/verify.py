@@ -4,7 +4,9 @@ expect = [0, 1]
 result = []
 result_split = []
 dics = []
-
+class bcolors:
+    OK = '\033[92m'
+    RESET = '\033[0m'
 for i in range(2, 101):
     expect.append(expect[i - 1] + expect[i - 2])
 with open('out', 'r') as f:
@@ -26,3 +28,4 @@ for i in dics:
         print('input: %s' %(fib))
         print('expected: %s' %(expect[i[0]]))
         exit()
+print(bcolors.OK + ' All fibonacci numbers are correct!' + bcolors.RESET)

@@ -6,6 +6,10 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/slab.h>
+#include <linux/uaccess.h>  // Required for the copy_to_user()
+
+#include "bn_kernel.h"
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -17,7 +21,7 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
+#define MAX_LENGTH 100
 
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
@@ -37,6 +41,34 @@ static long long fib_sequence(long long k)
     }
 
     return f[k];
+}
+
+/* Calculate Fibonacci numbers by Fast Doubling */
+static long long fib_sequence_fdouble(long long n)
+{
+    if (n < 2) { /* F(0) = 0, F(1) = 1 */
+        return n;
+    }
+    long long f[2];
+    unsigned int ndigit = 32 - __builtin_clz(n); /* number of digit in n */
+    f[0] = 0;                                    /* F(k) */
+    f[1] = 1;                                    /* F(k+1) */
+
+    for (unsigned int i = 1U << (ndigit - 1); i;
+         i >>= 1) { /* walk through the digit of n */
+        long long k1 =
+            f[0] * (f[1] * 2 - f[0]); /* F(2k) = F(k) * [ 2 * F(k+1) – F(k) ] */
+        long long k2 =
+            f[0] * f[0] + f[1] * f[1]; /* F(2k+1) = F(k)^2 + F(k+1)^2 */
+        if (n & i) {                   /* current binary digit == 1 */
+            f[0] = k2;                 /* F(n) = F(2k+1) */
+            f[1] = k1 + k2; /* F(n+1) = F(2k+2) =  F(2k) +  F(2k+1) */
+        } else {
+            f[0] = k1; /* F(n) = F(2k) */
+            f[1] = k2; /* F(n+1) = F(2k+1) */
+        }
+    }
+    return f[0];
 }
 
 static int fib_open(struct inode *inode, struct file *file)
@@ -60,7 +92,16 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    bn *fib = bn_alloc(1);
+    bn_fib_fdoubling(fib, *offset);
+    // bn_fib(fib, *offset);
+    char *p = bn_to_string(fib);
+    size_t len = strlen(p) + 1;
+    size_t left = copy_to_user(buf, p, len);
+    // printk(KERN_DEBUG "fib(%d): %s\n", (int) *offset, p);
+    bn_free(fib);
+    kfree(p);
+    return left;  // return number of bytes that could not be copied
 }
 
 /* write operation is skipped */
@@ -69,7 +110,22 @@ static ssize_t fib_write(struct file *file,
                          size_t size,
                          loff_t *offset)
 {
-    return 1;
+    ktime_t kt;
+    switch (size) {
+    case 0:
+        kt = ktime_get();
+        fib_sequence(*offset);
+        kt = ktime_sub(ktime_get(), kt);
+        break;
+    case 1:
+        kt = ktime_get();
+        fib_sequence_fdouble(*offset);
+        kt = ktime_sub(ktime_get(), kt);
+        break;
+    default:
+        return 0;
+    }
+    return (ssize_t) ktime_to_ns(kt);
 }
 
 static loff_t fib_device_lseek(struct file *file, loff_t offset, int orig)
