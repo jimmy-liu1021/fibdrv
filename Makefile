@@ -21,7 +21,7 @@ $(GIT_HOOKS):
 
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
-	$(RM) client out
+	$(RM) client out measure
 load:
 	sudo insmod $(TARGET_MODULE).ko
 unload:
@@ -29,6 +29,9 @@ unload:
 
 client: client.c
 	$(CC) -o $@ $^
+
+measure: measure.c
+	$(CC) -o $@ $^ -lm
 
 PRINTF = env printf
 PASS_COLOR = \e[32;01m
